@@ -479,42 +479,65 @@ def download_latest_bench_config():
 async def save_uploaded_file(upload_event, slot_name: str) -> Path:
     """
     Saves NiceGUI uploaded file to data/uploads.
-    Handles NiceGUI versions where upload data is stored in e.file.
+    Supports both NiceGUI upload event styles:
+    - e.file
+    - e.content
     """
 
-    file_obj = getattr(upload_event, "file", None)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    if file_obj is None:
-        raise ValueError(
-            "Upload event did not include .file. Check NiceGUI upload event structure."
-        )
+    file_obj = getattr(upload_event, "file", None)
+    content_obj = getattr(upload_event, "content", None)
 
     original_name = (
-        getattr(file_obj, "filename", None)
+        getattr(upload_event, "name", None)
+        or getattr(file_obj, "filename", None)
         or getattr(file_obj, "name", None)
-        or f"{slot_name}_uploaded_spec.pdf"
+        or f"{slot_name}_uploaded_source"
     )
 
     safe_name = f"{slot_name}_{original_name}".replace(" ", "_")
     destination = UPLOAD_DIR / safe_name
 
-    # Most likely file_obj is a Starlette UploadFile.
-    # It may expose async read().
-    if hasattr(file_obj, "seek"):
-        result = file_obj.seek(0)
-        if hasattr(result, "__await__"):
-            await result
+    data = None
 
-    if hasattr(file_obj, "read"):
-        data = file_obj.read()
-        if hasattr(data, "__await__"):
-            data = await data
-    elif hasattr(file_obj, "file"):
-        inner_file = file_obj.file
-        inner_file.seek(0)
-        data = inner_file.read()
-    else:
-        raise ValueError("Could not read uploaded file data.")
+    # Style 1: event.content
+    if content_obj is not None:
+        if hasattr(content_obj, "seek"):
+            result = content_obj.seek(0)
+            if hasattr(result, "__await__"):
+                await result
+
+        if isinstance(content_obj, bytes):
+            data = content_obj
+        elif isinstance(content_obj, str):
+            data = content_obj.encode("utf-8")
+        elif hasattr(content_obj, "read"):
+            data = content_obj.read()
+            if hasattr(data, "__await__"):
+                data = await data
+
+    # Style 2: event.file
+    if data is None and file_obj is not None:
+        if hasattr(file_obj, "seek"):
+            result = file_obj.seek(0)
+            if hasattr(result, "__await__"):
+                await result
+
+        if hasattr(file_obj, "read"):
+            data = file_obj.read()
+            if hasattr(data, "__await__"):
+                data = await data
+        elif hasattr(file_obj, "file"):
+            inner_file = file_obj.file
+            inner_file.seek(0)
+            data = inner_file.read()
+
+    if data is None:
+        raise ValueError(
+            "Upload event did not include readable file data. "
+            f"Event fields: {getattr(upload_event, '__dict__', {})}"
+        )
 
     if isinstance(data, str):
         data = data.encode("utf-8")
@@ -526,7 +549,6 @@ async def save_uploaded_file(upload_event, slot_name: str) -> Path:
         f.write(data)
 
     return destination
-
 
 def create_chat_page():
     global latest_test_cases, latest_config_path, download_config_button
@@ -691,6 +713,7 @@ def create_chat_page():
                             on_upload=handle_spec_upload,
                             multiple=True,
                             max_files=3,
+                            auto_upload=True,
                         ).props("accept=.pdf,.xlsx").classes("w-full")
 
                     with ui.row().classes("w-full items-center gap-3 mt-3 mb-10"):
