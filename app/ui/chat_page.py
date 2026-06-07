@@ -19,6 +19,7 @@ chat_messages = []
 
 latest_test_cases = []
 latest_config_path = None
+download_config_button = None
 
 # Lightweight MVP memory
 pending_test_type = None
@@ -288,6 +289,7 @@ def format_power_strategy(test_case) -> str:
     return "Power strategy: not specified"
 
 
+
 def format_rf_test_chat_summary(test_case, validation: dict, default_assumptions: list | None = None) -> str:
     """
     Human-readable RF summary for the CHAT panel.
@@ -460,6 +462,20 @@ def format_clarification_response(result) -> str:
 
     return "\n".join(lines)
 
+def download_latest_bench_config():
+    if latest_config_path is None:
+        ui.notify("No bench config CSV has been generated yet.", type="warning")
+        return
+
+    if not latest_config_path.exists():
+        ui.notify("Bench config file was not found on the server.", type="negative")
+        return
+
+    ui.download(
+        str(latest_config_path),
+        filename=latest_config_path.name,
+    )
+
 async def save_uploaded_file(upload_event, slot_name: str) -> Path:
     """
     Saves NiceGUI uploaded file to data/uploads.
@@ -513,7 +529,7 @@ async def save_uploaded_file(upload_event, slot_name: str) -> Path:
 
 
 def create_chat_page():
-    global latest_test_cases, latest_config_path
+    global latest_test_cases, latest_config_path, download_config_button
     global pending_test_type, pending_rf_notes, connected_bench
     global uploaded_spec_paths_by_slot
 
@@ -656,10 +672,17 @@ def create_chat_page():
                         ui.notify(f"Uploaded {saved_path.name}", type="positive")
 
                     def clear_uploaded_specs():
-                        global uploaded_spec_paths_by_slot
+                        global uploaded_spec_paths_by_slot, latest_config_path, download_config_button
 
                         uploaded_spec_paths_by_slot = {}
+                        latest_config_path = None
                         spec_status.set_content("No sources uploaded yet.")
+                        csv_preview.set_content("No bench config CSV generated yet.")
+
+                        if download_config_button is not None:
+                            download_config_button.disable()
+                            download_config_button.update()
+
                         ui.notify("Cleared uploaded sources.", type="info")
 
                     with ui.column().classes("w-full gap-2 mt-4"):
@@ -722,7 +745,7 @@ def create_chat_page():
                 )
 
                 def export_config():
-                    global latest_test_cases, latest_config_path
+                    global latest_test_cases, latest_config_path, download_config_button
 
                     if not latest_test_cases:
                         ui.notify("No test cases generated yet.", type="warning")
@@ -738,7 +761,7 @@ def create_chat_page():
                         file_name=file_name,
                     )
 
-                    latest_config_path = file_path
+                    latest_config_path = Path(file_path)
 
                     for tc in latest_test_cases:
                         save_generated_config(tc.test_id, str(file_path))
@@ -751,7 +774,13 @@ def create_chat_page():
                         + "\n```"
                     )
 
-                    ui.notify(f"Generated bench config: {file_path.name}", type="positive")
+                    if download_config_button is not None:
+                        download_config_button.enable()
+                        download_config_button.update()
+                    else:
+                        ui.notify("Download button was not initialized.", type="warning")
+
+                    ui.notify(message=f"Generated bench config: {file_path.name}", type="positive")
 
                 ui.button("Generate Bench Config", on_click=export_config).classes(
                     "w-full h-[48px] bg-blue-500 text-white font-bold"
@@ -761,7 +790,14 @@ def create_chat_page():
     # Bottom CSV preview panel
     # -----------------------------
     with ui.column().classes("w-full mt-6"):
-        ui.label("Generated Bench Config CSV").classes("text-xl font-bold")
+        with ui.row().classes("w-full items-center justify-between mt-4"):
+            ui.label("Generated Bench Config CSV").classes("text-xl font-bold")
+
+            download_config_button = ui.button(
+                "DOWNLOAD BENCH CONFIG CSV",
+                on_click=download_latest_bench_config,
+            ).classes("bg-green-600 text-white font-bold")
+            download_config_button.disable()
 
         csv_preview = ui.markdown("No bench config CSV generated yet.").classes(
             "w-full h-56 border rounded-lg p-4 overflow-auto bg-gray-950 text-sm"
@@ -777,7 +813,7 @@ def create_chat_page():
             The LLM call is blocking, so it is executed in a background thread using
             asyncio.to_thread(). All NiceGUI UI updates remain on the main async path.
             """
-            global latest_test_cases, latest_config_path
+            global latest_test_cases, latest_config_path, download_config_button
             global pending_test_type, pending_rf_notes
 
             msg = (user_input.value or "").strip()
@@ -865,6 +901,9 @@ def create_chat_page():
                 test_case = result.test_case
                 latest_test_cases = [test_case]
                 latest_config_path = None
+                if download_config_button is not None:
+                    download_config_button.disable()
+                    download_config_button.update()
 
                 pending_test_type = None
                 pending_rf_notes = []
@@ -927,7 +966,7 @@ def create_chat_page():
     # Source processing logic: PDF specs + structured XLSX workbooks
     # -----------------------------
     async def process_specs():
-        global latest_test_cases, latest_config_path
+        global latest_test_cases, latest_config_path, download_config_button
 
         uploaded_source_paths = list(uploaded_spec_paths_by_slot.values())
 
@@ -1053,6 +1092,9 @@ def create_chat_page():
 
             latest_test_cases = all_generated_tests
             latest_config_path = None
+            if download_config_button is not None:
+                download_config_button.disable()
+                download_config_button.update()
 
             if not latest_test_cases:
                 validation_summary = {
