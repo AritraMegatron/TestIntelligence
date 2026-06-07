@@ -1,5 +1,5 @@
 from nicegui import ui
-
+import os
 from app.db.duckdb_client import init_db
 from app.ui.chat_page import create_chat_page
 
@@ -17,9 +17,12 @@ def main():
 
     ui.run(
         title="Inventide Test Intelligence",
-        host="127.0.0.1",
-        port=8090,
-        reload=True,
+        #host="127.0.0.1",
+        #port=8090,
+        #reload=True,
+        host="0.0.0.0",
+        port = int(os.environ.get("PORT", 8090)),
+        reload = False
     )
 
 
