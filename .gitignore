@@ -12,3 +12,4 @@ outputs/
 generated/
 .DS_Store
 .idea/
+.agents/

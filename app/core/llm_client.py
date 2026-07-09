@@ -1,34 +1,13 @@
 import os
 import json
+import urllib.request
+import urllib.error
 from json import JSONDecodeError
 from dotenv import load_dotenv
 
-try:
-    from openai import OpenAI
-except ImportError:  # keeps non-LLM unit tests/imports from crashing
-    OpenAI = None
-
 load_dotenv(override=True)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
-
-client = None
-
-
-def _get_client():
-    global client
-
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is missing. Add it to your .env file.")
-
-    if OpenAI is None:
-        raise RuntimeError("openai package is missing. Install it with: pip install openai")
-
-    if client is None:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-
-    return client
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "llama3")
 
 
 def _strip_markdown_fence(text: str) -> str:
@@ -101,20 +80,28 @@ def _parse_json_lenient(text: str) -> dict:
 
 
 def _call_openai_text(system_prompt: str, user_prompt: str) -> str:
-    response = _get_client().responses.create(
-        model=OPENAI_MODEL,
-        input=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            },
+    url = "http://localhost:11434/api/chat"
+    data = {
+        "model": OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ],
+        "stream": False
+    }
+    
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
     )
-    return response.output_text
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            return result.get("message", {}).get("content", "")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Failed to connect to Ollama at {url}. Make sure Ollama is running. Error: {e}")
 
 
 def call_llm_for_json(system_prompt: str, user_prompt: str) -> dict:
@@ -131,7 +118,7 @@ def call_llm_for_json(system_prompt: str, user_prompt: str) -> dict:
 
     try:
         return _parse_json_lenient(text_output)
-    except Exception as first_exc:
+    except Exception:
         repair_prompt = f"""
 The previous model response was supposed to be exactly one JSON object, but it was not parseable.
 
