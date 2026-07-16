@@ -24,9 +24,18 @@ By default, the application is configured to use **Llama 3**. You need to downlo
 3. *Note: This will take a few minutes as it downloads the model weights (a few gigabytes). Once it finishes and you see a `>>>` chat prompt, you can just type `/bye` to exit. The model is now saved on your machine.*
 
 ### Step 3: Set up your Python Environment
-Make sure your Python environment is up to date:
-1. Ensure your virtual environment is activated (e.g. `venv\Scripts\activate` on Windows).
-2. Install the requirements:
+Since you are pulling fresh code, it is highly recommended to create a clean virtual environment and install the required packages:
+
+1. Create a new virtual environment:
+   ```bash
+   python -m venv .venv
+   ```
+2. Activate the virtual environment (Windows):
+   ```bash
+   .\.venv\Scripts\Activate.ps1
+   ```
+   *(For Mac/Linux, use `source .venv/bin/activate`)*
+3. Install the requirements:
    ```bash
    pip install -r requirements.txt
    ```
@@ -41,4 +50,9 @@ You no longer need a real `.env` file for the API key, but the application expec
    *(Note: The variable is still named `OPENAI_MODEL` for legacy compatibility in the code, but it is now pointing to your local Ollama model).*
 
 ### Step 5: Run the Application
-Start the application exactly as you normally would. As long as the Ollama app is running in the background on your computer, the application will automatically connect to it via `http://localhost:11434` and generate responses locally.
+Start the application using Python. Ensure your virtual environment is still activated from Step 3, then run:
+```bash
+python -m app.main
+```
+
+As long as the Ollama app is running in the background on your computer, the application will automatically connect to it and generate responses locally. You can access the UI in your browser at `http://localhost:8090`.
