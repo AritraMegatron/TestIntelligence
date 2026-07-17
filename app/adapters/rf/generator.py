@@ -921,6 +921,19 @@ def normalize_rf_test_case(test_case: RFTestCase, user_message: str = "",default
     The LLM proposes JSON.
     This function makes the output bench-consistent before validation/config generation.
     """
+    if test_case is None:
+        return None
+        
+    from app.models.rf_models import RFStimulus, RFBias, RFEnvironment, RFMeasurement
+    if test_case.stimulus is None:
+        test_case.stimulus = RFStimulus()
+    if test_case.dut_bias is None:
+        test_case.dut_bias = RFBias()
+    if test_case.environment is None:
+        test_case.environment = RFEnvironment()
+    if getattr(test_case, "measurement", None) is None:
+        test_case.measurement = RFMeasurement()
+
     _normalize_all_list_fields(test_case)
     _normalize_power_fields(test_case)
     _normalize_additional_measurement_metrics(test_case, user_message)
