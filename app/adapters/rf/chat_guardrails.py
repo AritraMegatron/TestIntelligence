@@ -47,6 +47,10 @@ def user_requested_defaults(message: str) -> bool:
     if msg in standalone_phrases:
         return True
 
+    for phrase in standalone_phrases:
+        if msg.endswith(f". {phrase}") or msg.endswith(f", {phrase}"):
+            return True
+
     # Strong explicit intent to fill missing parameters.
     explicit_fill_phrases = [
         "use defaults for missing",
