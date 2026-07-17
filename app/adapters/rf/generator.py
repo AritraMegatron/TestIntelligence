@@ -1217,6 +1217,12 @@ Remember:
                 test_case=test_case,
             )
 
+        if requested_defaults:
+            return response_from_clarification(
+                ["I see you want to use defaults, but I don't know what test type you want to generate. Please reply with 'EVM', 'GAIN', 'ACPR', 'CURRENT', or 'S_PARAMETER'."],
+                [],
+            )
+
         return response_from_clarification(
             [
                 "I could not convert that message into a valid RF test object yet. Please provide the test type and key bench parameters, or reply 'use defaults' after selecting a test type."
