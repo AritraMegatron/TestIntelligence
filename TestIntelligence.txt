@@ -1,0 +1,30 @@
+TestIntelligence/
+├── .venv/
+├── app/
+│   ├── main.py
+│   ├── settings.py
+│   ├── models/
+│   │   └── rf_models.py
+│   ├── adapters/
+│   │   └── rf/
+│   │       ├── generator.py
+│   │       ├── validator.py
+│   │       └── config_generator.py
+│   ├── db/
+│   │   └── duckdb_client.py
+│   └── ui/
+│       └── chat_page.py
+├── data/
+│   ├── uploads/
+│   └── generated/
+├── requirements.txt
+├── .env
+└── .gitignore
+
+I’m an electrical engineer based near Minneapolis, and I’ve been building a prototype in the RF test/design workflow space based on my past experience at Skyworks.
+
+It’s an AI-assisted tool for RF engineering teams that can process RF specs, test plans, and datasheets into structured test cases, validation checks, and bench-ready configuration files. It also has a chat interface where a designer or test engineer can describe a test in plain language, and the system turns that conversation into a config file that can be used by an existing test platform.
+
+I’d really value your blunt feedback from a Falcomm RF design perspective. Would you be open to a quick 10-minute Zoom sometime this or next week? I’m just trying to understand whether this solves a real workflow pain :)
+
+Cheers.

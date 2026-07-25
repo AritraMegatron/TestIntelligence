@@ -898,7 +898,7 @@ def create_chat_page():
 
             try:
                 # This is the important async change.
-                # generate_rf_test_from_chat() calls the OpenAI API and is blocking,
+                # generate_rf_test_from_chat() calls the selected LLM provider and is blocking,
                 # so we move it off the UI event loop.
                 result = await asyncio.to_thread(
                     generate_rf_test_from_chat,
