@@ -24,7 +24,7 @@ from openpyxl import load_workbook
 from app.models.rf_models import RFSpecGenerationResponse, RFTestCase
 
 
-SUPPORTED_EXCEL_TEST_TYPES = {"EVM"}
+SUPPORTED_EXCEL_TEST_TYPES = {"EVM", "ACPR"}
 REQUIRED_COLUMNS = {"test_name", "test_type"}
 
 
@@ -149,7 +149,7 @@ def _slug(value: str) -> str:
 
 
 def _limit_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
-    value = _number(row.get("evm_limit_db") or row.get("limit_value"))
+    value = _number(row.get("evm_limit_db") or row.get("limit_value") or row.get("acpr_limit_dbc"))
     if value is None:
         return None
 
@@ -171,6 +171,138 @@ def _modulation_from_row(row: dict[str, Any]) -> str | None:
         return burst_length
 
     return _cell_text(row.get("modulation"))
+
+
+def _acpr_band_pairs_from_row(row: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """
+    Extracts ACPR band pairs from Excel row.
+    
+    Expected columns (based on ACPR_Test_Plan.xlsx format):
+    - acpr_offset_mhz: primary offset frequency
+    - acpr_adjacent_bw_mhz: bandwidth for adjacent channel
+    - acpr_alternate_offset_mhz: alternate offset frequency (optional)
+    
+    Creates band pairs for ACPR measurement. If alternate offset is provided,
+    creates two band pairs (primary and alternate).
+    """
+    primary_offset = _number(row.get("acpr_offset_mhz"))
+    bandwidth = _number(row.get("acpr_adjacent_bw_mhz"))
+    alternate_offset = _number(row.get("acpr_alternate_offset_mhz"))
+    
+    if not primary_offset:
+        return None
+    
+    band_pairs = []
+    
+    # Primary band pair (lower and upper at same offset distance)
+    band_pairs.append({
+        "lower_offset_mhz": primary_offset,
+        "upper_offset_mhz": primary_offset,
+        "bandwidth_mhz": bandwidth,
+    })
+    
+    # Alternate band pair if provided
+    if alternate_offset:
+        band_pairs.append({
+            "lower_offset_mhz": alternate_offset,
+            "upper_offset_mhz": alternate_offset,
+            "bandwidth_mhz": bandwidth,
+        })
+    
+    return band_pairs
+
+
+def _build_acpr_test_case(
+    row: dict[str, Any],
+    *,
+    source_file_name: str,
+    sheet_name: str,
+    row_index: int,
+) -> RFTestCase:
+    test_name = _cell_text(row.get("test_name")) or f"{sheet_name} row {row_index}"
+    test_id = f"RF_XLSX_{_slug(sheet_name)}_{row_index:03d}_{str(uuid.uuid4())[:4].upper()}"
+
+    servo_power = _number_list(row.get("servo_output_power_dbm"))
+    input_power = None if servo_power else _number_list(row.get("input_power_dbm"))
+
+    modulation = _cell_text(row.get("modulation"))
+    
+    data = {
+        "schema_version": "inventide.rf.testcase.v1",
+        "domain": "RF",
+        "test_id": test_id,
+        "test_type": "ACPR",
+        "bench_type": "RF_BENCH",
+        "objective": f"Run ACPR test from Excel workbook row: {test_name}",
+        "stimulus": {
+            "frequency_mhz": _number_list(row.get("frequency_mhz")),
+            "dut_mode_name": _string_list(row.get("dut_mode_name")) or ["DEFAULT_TX_MODE"],
+            "dut_alternate_mode_name": None,
+            "modulation": [modulation] if modulation else None,
+            "input_power_dbm": input_power,
+            "servo_output_power_dbm": servo_power,
+            "bandwidth_mhz": _number_list(row.get("bandwidth_mhz")),
+            "duty_cycle_pct": None,
+            "acpr_band_pairs": _acpr_band_pairs_from_row(row),
+        },
+        "dut_bias": {
+            "vcc_v": _number_list(row.get("vcc_v")),
+            "vdd_v": _number_list(row.get("vdd_v")),
+        },
+        "environment": {
+            "temperature_c": _number_list(row.get("temperature_c")) or [25.0],
+        },
+        "measurement": {
+            "metric": "ACPR",
+            "limit": _limit_from_row(row),
+            "additional_metrics": _additional_metrics(row.get("additional_metrics")),
+        },
+        "evm_settings": None,
+        "s_parameter_settings": None,
+        "sweep": None,
+        "source_evidence": [
+            f"{source_file_name} | sheet={sheet_name} | row={row_index} | test_name={test_name}"
+        ],
+        "confidence": "high",
+        "execution_target": {
+            "runner": "Generic_RF_TestRunner",
+            "config_format": "csv",
+        },
+    }
+
+    sweep_axes = []
+
+    if data["stimulus"]["frequency_mhz"] and len(data["stimulus"]["frequency_mhz"]) > 1:
+        sweep_axes.append("frequency_mhz")
+
+    if data["stimulus"]["servo_output_power_dbm"] and len(data["stimulus"]["servo_output_power_dbm"]) > 1:
+        sweep_axes.append("power")
+
+    if data["stimulus"]["input_power_dbm"] and len(data["stimulus"]["input_power_dbm"]) > 1:
+        sweep_axes.append("power")
+
+    if data["dut_bias"]["vcc_v"] and len(data["dut_bias"]["vcc_v"]) > 1:
+        sweep_axes.append("vcc_v")
+
+    if data["dut_bias"]["vdd_v"] and len(data["dut_bias"]["vdd_v"]) > 1:
+        sweep_axes.append("vdd_v")
+
+    if data["environment"]["temperature_c"] and len(data["environment"]["temperature_c"]) > 1:
+        sweep_axes.append("temperature_c")
+
+    if data["stimulus"]["dut_mode_name"] and len(data["stimulus"]["dut_mode_name"]) > 1:
+        sweep_axes.append("dut_mode_name")
+
+    if data["stimulus"]["modulation"] and len(data["stimulus"]["modulation"]) > 1:
+        sweep_axes.append("modulation")
+
+    if sweep_axes:
+        data["sweep"] = {
+            "sweep_type": "full_factorial",
+            "expansion_order": list(dict.fromkeys(sweep_axes)),
+        }
+
+    return RFTestCase.model_validate(data)
 
 
 def _build_evm_test_case(
@@ -325,20 +457,30 @@ def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationR
                 rejected_candidates.append(
                     {
                         "candidate": f"{sheet.title} row {row_index}",
-                        "reason": f"Excel MVP currently supports only EVM rows; got {test_type or 'blank'}.",
+                        "reason": f"Excel MVP currently supports only EVM and ACPR rows; got {test_type or 'blank'}.",
                     }
                 )
                 continue
 
             try:
-                generated_tests.append(
-                    _build_evm_test_case(
-                        row,
-                        source_file_name=workbook_path.name,
-                        sheet_name=sheet.title,
-                        row_index=row_index,
+                if test_type == "EVM":
+                    generated_tests.append(
+                        _build_evm_test_case(
+                            row,
+                            source_file_name=workbook_path.name,
+                            sheet_name=sheet.title,
+                            row_index=row_index,
+                        )
                     )
-                )
+                elif test_type == "ACPR":
+                    generated_tests.append(
+                        _build_acpr_test_case(
+                            row,
+                            source_file_name=workbook_path.name,
+                            sheet_name=sheet.title,
+                            row_index=row_index,
+                        )
+                    )
             except Exception as exc:
                 rejected_candidates.append(
                     {
@@ -350,9 +492,9 @@ def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationR
     status = "ready" if generated_tests else "no_tests_found"
 
     summary = (
-        f"Generated {len(generated_tests)} EVM tests from structured Excel workbook {workbook_path.name}."
+        f"Generated {len(generated_tests)} RF tests from structured Excel workbook {workbook_path.name}."
         if generated_tests
-        else f"No supported EVM tests were generated from Excel workbook {workbook_path.name}."
+        else f"No supported RF tests were generated from Excel workbook {workbook_path.name}."
     )
 
     return RFSpecGenerationResponse(
@@ -361,8 +503,8 @@ def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationR
         generated_tests=generated_tests,
         rejected_candidates=rejected_candidates,
         default_assumptions=[
-            "Excel workbook ingestion used the structured MVP format; each populated EVM row became one RFTestCase.",
-            "burst_length was used as the bench modulation/waveform name when present.",
+            "Excel workbook ingestion used the structured MVP format; each populated row became one RFTestCase.",
+            "burst_length was used as the bench modulation/waveform name when present (EVM tests).",
             "DYNAMIC EVM rows default dut_alternate_mode_name to OFF.",
         ],
     )
