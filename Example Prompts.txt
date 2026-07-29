@@ -1,0 +1,7 @@
+Case 1: Create a gain test at 5180 MHz with input power -25 dBm, VCC 3.3 V, VDD 1.8 V, pass if gain is at least 27 dB. Keep everything else default.
+
+Case 2: Do an EVM test, servo to output power 25dbm, on DUT mode TX High, measure static EVM. Frequency 2400MHz, modulation AX-300-4ms. Keep everything else as default
+
+now change it to dynamic EVM with duty cycle 50, 90%.
+
+can you change the expansion order to duty cycle and then power?

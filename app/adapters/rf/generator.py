@@ -914,12 +914,16 @@ def _normalize_additional_measurement_metrics(test_case: RFTestCase, user_messag
 
     test_case.measurement.additional_metrics = existing
 
-def normalize_rf_test_case(test_case: RFTestCase, user_message: str = "",defaults_allowed: bool = False,) -> RFTestCase:
+def normalize_rf_test_case(
+    test_case: RFTestCase,
+    user_message: str = "",
+    defaults_allowed: bool = False,
+) -> RFTestCase:
     """
     Deterministic cleanup after LLM generation.
 
-    The LLM proposes JSON.
-    This function makes the output bench-consistent before validation/config generation.
+    Pydantic validation guarantees the required nested RF objects exist before
+    this function runs. This function then makes the output bench-consistent.
     """
     _normalize_all_list_fields(test_case)
     _normalize_power_fields(test_case)
@@ -1144,6 +1148,10 @@ def build_demo_test_case(test_type: str, test_id: str) -> RFTestCase:
         measurement=RFMeasurement(metric=test_type),
     )
 
+    completed, _assumptions = apply_demo_defaults(base)
+    return completed
+
+
 def generate_rf_test_from_chat(
     user_message: str,
     chat_context: str = "",
@@ -1192,7 +1200,7 @@ Remember:
         )
         safe_json = coerce_generation_json(raw_json, test_id)
         response = RFGenerationResponse.model_validate(safe_json)
-    except (ValueError, ValidationError):
+    except (ValueError, ValidationError, RuntimeError):
         if requested_defaults and local_test_type:
             test_case = build_demo_test_case(local_test_type, test_id)
             return RFGenerationResponse(
@@ -1202,6 +1210,12 @@ Remember:
                     "LLM output was not usable, so TestBridge generated a deterministic demo-default test instead.",
                 ],
                 test_case=test_case,
+            )
+
+        if requested_defaults:
+            return response_from_clarification(
+                ["I see you want to use defaults, but I don't know what test type you want to generate. Please reply with 'EVM', 'GAIN', 'ACPR', 'CURRENT', or 'S_PARAMETER'."],
+                [],
             )
 
         return response_from_clarification(
