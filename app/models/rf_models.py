@@ -3,8 +3,8 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-RFTestType = Literal["GAIN", "EVM", "ACPR", "CURRENT", "S_PARAMETER"]
-RFAdditionalMetric = Literal["PIN", "POUT", "CURRENT"]
+RFTestType = Literal["GAIN", "EVM", "ACPR", "CURRENT", "S_PARAMETER", "P1DB"]
+RFAdditionalMetric = Literal["PIN", "POUT", "CURRENT", "GAIN"]
 BenchType = Literal["RF_BENCH", "S_PARAMETER_BENCH"]
 SweepType = Literal["full_factorial", "zipped"]
 
@@ -201,6 +201,15 @@ class RFMeasurement(BaseModel):
     #
     # This means EVM is the primary measurement, while PIN/POUT are also captured.
     additional_metrics: List[RFAdditionalMetric] = Field(default_factory=list)
+
+    # P1dB-specific measurement settings
+    measurement_method: Optional[Literal["POWER_SWEEP", "GAIN_COMPRESSION"]] = None
+    compression_threshold_db: Optional[float] = None
+    settling_time_ms: Optional[float] = None
+    averages: Optional[int] = None
+    pin_start_dbm: Optional[float] = None
+    pin_stop_dbm: Optional[float] = None
+    pin_step_dbm: Optional[float] = None
 
 
 class RFEVMSettings(BaseModel):
