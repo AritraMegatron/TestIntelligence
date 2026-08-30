@@ -24,7 +24,7 @@ from openpyxl import load_workbook
 from app.models.rf_models import RFSpecGenerationResponse, RFTestCase
 
 
-SUPPORTED_EXCEL_TEST_TYPES = {"EVM", "ACPR"}
+SUPPORTED_EXCEL_TEST_TYPES = {"EVM", "ACPR", "P1DB"}
 REQUIRED_COLUMNS = {"test_name", "test_type"}
 
 
@@ -149,7 +149,7 @@ def _slug(value: str) -> str:
 
 
 def _limit_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
-    value = _number(row.get("evm_limit_db") or row.get("limit_value") or row.get("acpr_limit_dbc"))
+    value = _number(row.get("evm_limit_db") or row.get("limit_value") or row.get("acpr_limit_dbc") or row.get("limit_op1db_min_dbm"))
     if value is None:
         return None
 
@@ -402,6 +402,101 @@ def _build_evm_test_case(
     return RFTestCase.model_validate(data)
 
 
+def _build_p1db_test_case(
+    row: dict[str, Any],
+    *,
+    source_file_name: str,
+    sheet_name: str,
+    row_index: int,
+) -> RFTestCase:
+    test_name = _cell_text(row.get("test_name")) or f"{sheet_name} row {row_index}"
+    test_id = f"RF_XLSX_{_slug(sheet_name)}_{row_index:03d}_{str(uuid.uuid4())[:4].upper()}"
+
+    modulation = _cell_text(row.get("modulation"))
+    duty_cycle = _number_list(row.get("duty_cycle_pct"))
+    
+    data = {
+        "schema_version": "inventide.rf.testcase.v1",
+        "domain": "RF",
+        "test_id": test_id,
+        "test_type": "P1DB",
+        "bench_type": "RF_BENCH",
+        "objective": f"Run P1dB test from Excel workbook row: {test_name}",
+        "stimulus": {
+            "frequency_mhz": _number_list(row.get("frequency_mhz")),
+            "dut_mode_name": _string_list(row.get("dut_mode_name")) or ["DEFAULT_TX_MODE"],
+            "dut_alternate_mode_name": None,
+            "modulation": [modulation] if modulation else None,
+            "input_power_dbm": None,  # P1dB sweeps input power via pin_start/stop/step
+            "servo_output_power_dbm": None,
+            "bandwidth_mhz": _number_list(row.get("bandwidth_mhz")),
+            "duty_cycle_pct": duty_cycle,
+            "acpr_band_pairs": None,
+        },
+        "dut_bias": {
+            "vcc_v": _number_list(row.get("vcc_v")),
+            "vdd_v": _number_list(row.get("vdd_v")),
+        },
+        "environment": {
+            "temperature_c": _number_list(row.get("temperature_c")) or [25.0],
+        },
+        "measurement": {
+            "metric": "P1DB",
+            "limit": _limit_from_row(row),
+            "additional_metrics": _additional_metrics(row.get("additional_metrics")),
+            "measurement_method": _cell_text(row.get("measurement_method")) or "POWER_SWEEP",
+            "compression_threshold_db": _number(row.get("compression_threshold_db")) or 1.0,
+            "settling_time_ms": _number(row.get("settling_time_ms")) or 50.0,
+            "averages": _number(row.get("averages")) or 20,
+            "pin_start_dbm": _number(row.get("pin_start_dbm")),
+            "pin_stop_dbm": _number(row.get("pin_stop_dbm")),
+            "pin_step_dbm": _number(row.get("pin_step_dbm")),
+        },
+        "evm_settings": None,
+        "s_parameter_settings": None,
+        "sweep": None,
+        "source_evidence": [
+            f"{source_file_name} | sheet={sheet_name} | row={row_index} | test_name={test_name}"
+        ],
+        "confidence": "high",
+        "execution_target": {
+            "runner": "Generic_RF_TestRunner",
+            "config_format": "csv",
+        },
+    }
+
+    sweep_axes = []
+
+    if data["stimulus"]["frequency_mhz"] and len(data["stimulus"]["frequency_mhz"]) > 1:
+        sweep_axes.append("frequency_mhz")
+
+    if data["dut_bias"]["vcc_v"] and len(data["dut_bias"]["vcc_v"]) > 1:
+        sweep_axes.append("vcc_v")
+
+    if data["dut_bias"]["vdd_v"] and len(data["dut_bias"]["vdd_v"]) > 1:
+        sweep_axes.append("vdd_v")
+
+    if data["environment"]["temperature_c"] and len(data["environment"]["temperature_c"]) > 1:
+        sweep_axes.append("temperature_c")
+
+    if data["stimulus"]["dut_mode_name"] and len(data["stimulus"]["dut_mode_name"]) > 1:
+        sweep_axes.append("dut_mode_name")
+
+    if data["stimulus"]["modulation"] and len(data["stimulus"]["modulation"]) > 1:
+        sweep_axes.append("modulation")
+
+    if data["stimulus"]["duty_cycle_pct"] and len(data["stimulus"]["duty_cycle_pct"]) > 1:
+        sweep_axes.append("duty_cycle_pct")
+
+    if sweep_axes:
+        data["sweep"] = {
+            "sweep_type": "full_factorial",
+            "expansion_order": list(dict.fromkeys(sweep_axes)),
+        }
+
+    return RFTestCase.model_validate(data)
+
+
 def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationResponse:
     """
     Reads a structured MVP Excel workbook and returns RFSpecGenerationResponse.
@@ -457,7 +552,7 @@ def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationR
                 rejected_candidates.append(
                     {
                         "candidate": f"{sheet.title} row {row_index}",
-                        "reason": f"Excel MVP currently supports only EVM and ACPR rows; got {test_type or 'blank'}.",
+                        "reason": f"Excel MVP currently supports only EVM, ACPR, and P1DB rows; got {test_type or 'blank'}.",
                     }
                 )
                 continue
@@ -475,6 +570,15 @@ def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationR
                 elif test_type == "ACPR":
                     generated_tests.append(
                         _build_acpr_test_case(
+                            row,
+                            source_file_name=workbook_path.name,
+                            sheet_name=sheet.title,
+                            row_index=row_index,
+                        )
+                    )
+                elif test_type == "P1DB":
+                    generated_tests.append(
+                        _build_p1db_test_case(
                             row,
                             source_file_name=workbook_path.name,
                             sheet_name=sheet.title,
@@ -506,5 +610,6 @@ def generate_rf_tests_from_excel_workbook(path: str | Path) -> RFSpecGenerationR
             "Excel workbook ingestion used the structured MVP format; each populated row became one RFTestCase.",
             "burst_length was used as the bench modulation/waveform name when present (EVM tests).",
             "DYNAMIC EVM rows default dut_alternate_mode_name to OFF.",
+            "P1dB tests use input power sweep via pin_start_dbm, pin_stop_dbm, pin_step_dbm parameters.",
         ],
     )
