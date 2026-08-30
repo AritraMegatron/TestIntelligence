@@ -873,7 +873,7 @@ def create_chat_page():
                 effective_msg = f"""
     Continue the existing RF test request.
 
-    The selected test type is {pending_test_type}.
+    The user selected test type is {pending_test_type}.
 
     Preserve all user-provided parameters from this pending context:
     {pending_context_text}
@@ -899,7 +899,7 @@ def create_chat_page():
             try:
                 # This is the important async change.
                 # generate_rf_test_from_chat() calls the selected LLM provider and is blocking,
-                # so we move it off the UI event loop.
+                # so we move it off the UI event loop
                 result = await asyncio.to_thread(
                     generate_rf_test_from_chat,
                     effective_msg,
