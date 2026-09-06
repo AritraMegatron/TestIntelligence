@@ -301,8 +301,14 @@ def _base_config_row(test_case: RFTestCase) -> dict:
         "sweep_order": "",
         "sweep_index": "",
         "sweep_total": "",
-        "averages": 10,
+        "averages": getattr(test_case.measurement, "averages", 10),
         "capture_time_ms": 20,
+        "measurement_method": getattr(test_case.measurement, "measurement_method", "") or "",
+        "compression_threshold_db": getattr(test_case.measurement, "compression_threshold_db", "") or "",
+        "settling_time_ms": getattr(test_case.measurement, "settling_time_ms", "") or "",
+        "pin_start_dbm": getattr(test_case.measurement, "pin_start_dbm", "") or "",
+        "pin_stop_dbm": getattr(test_case.measurement, "pin_stop_dbm", "") or "",
+        "pin_step_dbm": getattr(test_case.measurement, "pin_step_dbm", "") or "",
         "runner": test_case.execution_target["runner"],
     }
 
