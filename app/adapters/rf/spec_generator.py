@@ -10,7 +10,7 @@ from app.models.rf_models import (
 )
 
 
-SPEC_SUPPORTED_TEST_TYPES = {"GAIN", "EVM", "ACPR", "CURRENT"}
+SPEC_SUPPORTED_TEST_TYPES = {"GAIN", "EVM", "ACPR", "CURRENT", "P1DB"}
 
 # bandwidth_mhz is intentionally not a sweep axis.
 # It is paired metadata with modulation.
@@ -49,6 +49,7 @@ MVP SUPPORTED TEST TYPES:
 2. EVM
 3. ACPR
 4. CURRENT
+5. P1DB
 
 Do not generate S_PARAMETER tests in the SPEC upload MVP.
 
@@ -62,7 +63,7 @@ You must return this format:
       "schema_version": "inventide.rf.testcase.v1",
       "domain": "RF",
       "test_id": "string",
-      "test_type": "GAIN | EVM | ACPR | CURRENT",
+      "test_type": "GAIN | EVM | ACPR | CURRENT | P1DB",
       "bench_type": "RF_BENCH",
       "objective": "string",
       "stimulus": {
@@ -90,13 +91,20 @@ You must return this format:
         "temperature_c": [number] or null
       },
       "measurement": {
-        "metric": "GAIN | EVM | ACPR | CURRENT",
+        "metric": "GAIN | EVM | ACPR | CURRENT | P1DB",
         "limit": {
           "operator": "<= | >= | == | < | >",
           "value": number,
           "unit": "string"
         } or null,
-        "additional_metrics": ["PIN", "POUT", "CURRENT"]
+        "additional_metrics": ["PIN", "POUT", "CURRENT", "GAIN"],
+        "measurement_method": "POWER_SWEEP | GAIN_COMPRESSION" or null,
+        "compression_threshold_db": number or null,
+        "settling_time_ms": number or null,
+        "averages": number or null,
+        "pin_start_dbm": number or null,
+        "pin_stop_dbm": number or null,
+        "pin_step_dbm": number or null
       },
       "evm_settings": {
         "evm_type": "STATIC | DYNAMIC"
@@ -160,6 +168,7 @@ DATASHEET EXTRACTION RULES:
 - If the datasheet says "EVM", "802.11", "LTE", "NR", "modulated", or "error vector magnitude", create EVM tests when enough bench context is available.
 - If the datasheet says "ACPR", "ACLR", "adjacent channel", or "spectrum mask", create ACPR tests when offset/bandwidth context is available or use conservative default ACPR offsets with low/medium confidence.
 - If the datasheet gives supply current, ICC, IDD, quiescent current, or current consumption, create CURRENT tests if operating mode and supply rails are available or defaultable.
+- If the datasheet says "P1dB", "1 dB compression", "compression point", "output power at 1dB compression", or "OP1dB", create P1DB tests when power sweep context is available or use conservative default power sweep range with low/medium confidence.
 
 SUPPORTED TEST DETAILS:
 
@@ -254,14 +263,48 @@ Default assumptions if missing:
 - input_power_dbm = [-20]
 - temperature_c = [25].
 
+P1DB:
+Required or defaultable:
+- frequency_mhz
+- dut_mode_name
+- modulation
+- vcc_v
+- vdd_v
+- pin_start_dbm
+- pin_stop_dbm
+- pin_step_dbm
+
+Measurement:
+- metric = "P1DB"
+- If datasheet gives P1dB limit such as OP1dB >= 18 dBm, use it as limit.
+- P1dB uses power sweep via pin_start_dbm, pin_stop_dbm, pin_step_dbm instead of input_power_dbm or servo_output_power_dbm.
+- measurement_method defaults to "POWER_SWEEP".
+- compression_threshold_db defaults to 1.0.
+- settling_time_ms defaults to 50.
+- averages defaults to 20.
+- If datasheet says PIN/POUT/current/gain are measured or logged during P1dB, add them to measurement.additional_metrics.
+
+Default assumptions if missing:
+- pin_start_dbm = -30 (at least 15 dB below expected IP1dB)
+- pin_stop_dbm = +10 (at least 3 dB above expected IP1dB)
+- pin_step_dbm = 0.5
+- measurement_method = "POWER_SWEEP"
+- compression_threshold_db = 1.0
+- settling_time_ms = 50
+- averages = 20
+- temperature_c = [25].
+- input_power_dbm = null (P1dB uses power sweep)
+- servo_output_power_dbm = null (P1dB uses power sweep)
+
 ADDITIONAL MEASUREMENT RULES:
 - measurement.metric is the primary metric of the test.
 - measurement.additional_metrics is only for extra logged values.
 - If the datasheet/test text says input power is measured, logged, captured, or recorded, add "PIN".
 - If the datasheet/test text says output power is measured, logged, captured, or recorded, add "POUT".
 - If the datasheet/test text says current, supply current, ICC, or IDD is measured, logged, captured, or recorded as an extra value, add "CURRENT".
-- Do not change test_type because of additional metrics.
-- Do not add PIN/POUT/CURRENT unless supported by the text or clearly required by the generated test context.
+- If the datasheet/test text says gain is measured, logged, captured, or recorded as an extra value, add "GAIN".
+- Do not change test_type because of additional_metrics.
+- Do not add PIN/POUT/CURRENT/GAIN unless supported by the text or clearly required by the generated test context.
 
 DYNAMIC EVM DUT MODE SWITCHING RULES:
 - For EVM tests, dut_mode_name is the active DUT mode/state.
@@ -796,7 +839,7 @@ def _coerce_raw_spec_json(raw_json: dict, test_id_prefix: str) -> dict:
         if test_type not in SPEC_SUPPORTED_TEST_TYPES:
             rejected.append({
                 "candidate": test.get("objective", f"generated_tests[{index}]"),
-                "reason": f"Rejected because SPEC MVP only supports GAIN, EVM, ACPR, CURRENT; got {test_type or 'unknown'}.",
+                "reason": f"Rejected because SPEC MVP only supports GAIN, EVM, ACPR, CURRENT, P1DB; got {test_type or 'unknown'}.",
             })
             continue
 
