@@ -103,8 +103,13 @@ def detect_test_type_from_text(text: str) -> str | None:
         return "S_PARAMETER"
  
     if re.search(r"\buser selected test type is (gain test|test gain|measure gain|measurement of gain|small signal gain|power gain test)\b", msg):
+        print(f"\n[DEBUG] Detected GAIN test type")
         return "GAIN"
- 
+
+    if re.search(r"\buser selected test type is (p1db|1db compression|one db compression|p-1db|p1 db|p1db testcase|p1db test case)\b", msg):
+        print(f"\n[DEBUG chat_guardrails.py] Detected P1DB test type from 'user selected test type is' pattern")
+        return "P1DB"
+
     # Then look for user intent patterns in user detail sections
     # "user detail:" indicates actual user input vs template instructions
     user_detail_sections = re.split(r"\buser detail:\s*", msg)
@@ -137,7 +142,16 @@ def detect_test_type_from_text(text: str) -> str | None:
         ]
         if any(re.search(pattern, user_detail) for pattern in gain_patterns):
             return "GAIN"
- 
+
+        p1db_patterns = [
+            r"\bp1db\b", r"\b1db compression\b", r"\bone db compression\b",
+            r"\bp-1db\b", r"\bp1 db\b", r"\b1-db compression\b",
+            r"\bp1db testcase\b", r"\bp1db test case\b",
+        ]
+        if any(re.search(pattern, user_detail) for pattern in p1db_patterns):
+            print(f"\n[DEBUG chat_guardrails.py] Detected P1DB test type from user detail: {user_detail}")
+            return "P1DB"
+
     # Fallback to general message search (original behavior)
     if re.search(r"\b(evm|error vector magnitude)\b", msg):
         return "EVM"
@@ -163,7 +177,17 @@ def detect_test_type_from_text(text: str) -> str | None:
     ]
     if any(re.search(pattern, msg) for pattern in gain_patterns):
         return "GAIN"
- 
+
+    p1db_patterns = [
+        r"\bp1db\b", r"\b1db compression\b", r"\bone db compression\b",
+        r"\bp-1db\b", r"\bp1 db\b", r"\b1-db compression\b",
+        r"\bp1db testcase\b", r"\bp1db test case\b",
+    ]
+    if any(re.search(pattern, msg) for pattern in p1db_patterns):
+        print(f"\n[DEBUG chat_guardrails.py] Detected P1DB test type from fallback pattern")
+        return "P1DB"
+
+    print(f"\n[DEBUG chat_guardrails.py] No test type detected from: {msg}")
     return None
 
 
@@ -179,7 +203,7 @@ def coerce_generation_json(raw: Any, test_id: str) -> dict:
     """
     if not isinstance(raw, dict):
         return clarification_payload(
-            ["I could not read a valid RF test request from that message. Which test type do you want: GAIN, EVM, ACPR, CURRENT, or S_PARAMETER?"],
+            ["I could not read a valid RF test request from that message. Which test type do you want: GAIN, EVM, ACPR, CURRENT, P1DB, or S_PARAMETER?"],
             [DEFAULT_ASSUMPTION_TEXT],
         )
 
