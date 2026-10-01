@@ -50,12 +50,17 @@ def detect_test_type(message: str):
     if re.search(r"\b(current test|current consumption|supply current|icc|idd)\b", msg):
         return "CURRENT"
 
+    if re.search(r"\b(p1db|1db compression|one db compression|p-1db|p1 db|1-db compression|p1db testcase|p1db test case)\b", msg):
+        print(f"\n[DEBUG chat_page.py] Detected P1DB test type from: {msg}")
+        return "P1DB"
+
     gain_patterns = [
         r"\bgain test\b",
         r"\btest gain\b",
         r"\bmeasure gain\b",
         r"\bpower gain test\b",
         r"\bsmall signal gain\b",
+        r"\bmeasurement of gain\b",
     ]
 
     sparam_keywords = [
@@ -76,11 +81,14 @@ def detect_test_type(message: str):
     ]
 
     if any(keyword in msg for keyword in sparam_keywords):
+        print(f"\n[DEBUG chat_page.py] Detected S_PARAMETER test type from: {msg}")
         return "S_PARAMETER"
 
     if any(re.search(pattern, msg) for pattern in gain_patterns):
+        print(f"\n[DEBUG chat_page.py] Detected GAIN test type from: {msg}")
         return "GAIN"
 
+    print(f"\n[DEBUG chat_page.py] No test type detected from: {msg}")
     return None
 
 
@@ -406,6 +414,17 @@ def format_rf_test_chat_summary(test_case, validation: dict, default_assumptions
                 f"upper {pair.upper_offset_mhz} MHz, "
                 f"bandwidth {pair.bandwidth_mhz} MHz"
             )
+
+    if test_case.test_type == "P1DB":
+        lines.append("")
+        lines.append("P1dB power sweep settings:")
+        lines.append(f"- PIN start: {_scalar_text(getattr(meas, 'pin_start_dbm', None), 'dBm')}")
+        lines.append(f"- PIN stop: {_scalar_text(getattr(meas, 'pin_stop_dbm', None), 'dBm')}")
+        lines.append(f"- PIN step: {_scalar_text(getattr(meas, 'pin_step_dbm', None), 'dB')}")
+        lines.append(f"- Measurement method: {_scalar_text(getattr(meas, 'measurement_method', None))}")
+        lines.append(f"- Compression threshold: {_scalar_text(getattr(meas, 'compression_threshold_db', None), 'dB')}")
+        lines.append(f"- Settling time: {_scalar_text(getattr(meas, 'settling_time_ms', None), 'ms')}")
+        lines.append(f"- Averages: {_scalar_text(getattr(meas, 'averages', None))}")
 
     lines.append("")
     lines.append("Validation:")
@@ -840,7 +859,9 @@ def create_chat_page():
             global pending_test_type, pending_rf_notes
 
             msg = (user_input.value or "").strip()
+            print(f"\n[DEBUG] User message is {msg}")
             if not msg:
+                print("[DEBUG] User message is empty")
                 return
 
             # Prevent double-submit while the LLM call is running.
@@ -852,6 +873,7 @@ def create_chat_page():
             user_input.update()
 
             detected_type = detect_test_type(msg)
+            print(f"\n[DEBUG] Detected test type is {detected_type}")
 
             if detected_type:
                 pending_test_type = detected_type
@@ -873,7 +895,7 @@ def create_chat_page():
                 effective_msg = f"""
     Continue the existing RF test request.
 
-    The selected test type is {pending_test_type}.
+    The user selected test type is {pending_test_type}.
 
     Preserve all user-provided parameters from this pending context:
     {pending_context_text}
@@ -886,11 +908,13 @@ def create_chat_page():
     - If the selected test type is GAIN, generate a GAIN test.
     - If the selected test type is ACPR, generate an ACPR test.
     - If the selected test type is CURRENT, generate a CURRENT test.
+    - If the selected test type is P1DB, generate a P1DB test.
     - If the user provided DUT mode name, preserve it exactly.
     - If the user provided servo output power, preserve it exactly.
     - If the user provided duty cycle, preserve it exactly.
     - If the user provided frequency, modulation, input power, VCC, VDD, or bandwidth, preserve them exactly.
     """
+                print(f"\n[DEBUG] Effective message is {effective_msg}")
 
             recent_context = "\n".join(
                 [f"{m['role']}: {m['content']}" for m in chat_messages[-8:]]
@@ -898,8 +922,8 @@ def create_chat_page():
 
             try:
                 # This is the important async change.
-                # generate_rf_test_from_chat() calls the OpenAI API and is blocking,
-                # so we move it off the UI event loop.
+                # generate_rf_test_from_chat() calls the selected LLM provider and is blocking,
+                # so we move it off the UI event loop
                 result = await asyncio.to_thread(
                     generate_rf_test_from_chat,
                     effective_msg,

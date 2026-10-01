@@ -607,6 +607,32 @@ def validate_rf_test_case(test_case: RFTestCase) -> dict:
                 "servo_output_power_dbm may not be used by the runner."
             )
 
+    elif test_case.test_type == "P1DB":
+        # P1dB uses power sweep parameters, not input_power_dbm or servo_output_power_dbm
+        if has_input_power or has_servo_power:
+            warnings.append(
+                "P1dB tests use power sweep via pin_start_dbm, pin_stop_dbm, pin_step_dbm. "
+                "input_power_dbm and servo_output_power_dbm may be ignored."
+            )
+
+        # Check for required P1dB measurement settings
+        if test_case.measurement.pin_start_dbm is None:
+            errors.append("P1dB test requires measurement.pin_start_dbm.")
+
+        if test_case.measurement.pin_stop_dbm is None:
+            errors.append("P1dB test requires measurement.pin_stop_dbm.")
+
+        if test_case.measurement.pin_step_dbm is None:
+            errors.append("P1dB test requires measurement.pin_step_dbm.")
+
+        # Validate power sweep range
+        if test_case.measurement.pin_start_dbm is not None and test_case.measurement.pin_stop_dbm is not None:
+            if test_case.measurement.pin_start_dbm >= test_case.measurement.pin_stop_dbm:
+                errors.append("P1dB pin_start_dbm must be less than pin_stop_dbm.")
+
+        if test_case.measurement.pin_step_dbm is not None and test_case.measurement.pin_step_dbm <= 0:
+            errors.append("P1dB pin_step_dbm must be greater than 0.")
+
     else:
         errors.append(f"Unsupported RF test_type: {test_case.test_type}")
 

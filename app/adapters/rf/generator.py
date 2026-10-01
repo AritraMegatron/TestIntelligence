@@ -36,7 +36,7 @@ GENERAL CHAT RULE:
 {
   "status": "needs_clarification",
   "clarifying_questions": [
-    "Hi, I can help generate RF tests. Which test type do you want: GAIN, EVM, ACPR, or CURRENT?"
+    "Hi, I can help generate RF tests. Which test type do you want: GAIN, EVM, ACPR, CURRENT, or P1DB?"
   ],
   "default_assumptions": [],
   "test_case": null
@@ -55,7 +55,7 @@ FORMAT A — if enough required information exists, or if demo default mode is r
     "schema_version": "inventide.rf.testcase.v1",
     "domain": "RF",
     "test_id": "string",
-    "test_type": "GAIN | EVM | ACPR | CURRENT | S_PARAMETER",
+    "test_type": "GAIN | EVM | ACPR | CURRENT | P1DB | S_PARAMETER",
     "bench_type": "RF_BENCH | S_PARAMETER_BENCH",
     "objective": "string",
     "stimulus": {
@@ -83,13 +83,13 @@ FORMAT A — if enough required information exists, or if demo default mode is r
       "temperature_c": [number] or [number, number] or null
     },
     "measurement": {
-      "metric": "GAIN | EVM | ACPR | CURRENT | S_PARAMETER",
+      "metric": "GAIN | EVM | ACPR | CURRENT | P1DB | S_PARAMETER",
       "limit": {
         "operator": "<= | >= | == | < | >",
         "value": number,
         "unit": "string"
       } or null,
-      "additional_metrics": ["PIN", "POUT", "CURRENT"]
+      "additional_metrics": ["PIN", "POUT", "CURRENT", "GAIN"]
     },
     "evm_settings": {
       "evm_type": "STATIC | DYNAMIC"
@@ -210,7 +210,31 @@ Required:
 - vcc_v
 - vdd_v
 
-5. S_PARAMETER
+5. P1DB
+Required:
+- frequency_mhz
+- dut_mode_name
+- modulation
+- vcc_v
+- vdd_v
+- pin_start_dbm
+- pin_stop_dbm
+- pin_step_dbm
+
+Important:
+- P1dB uses power sweep via pin_start_dbm, pin_stop_dbm, pin_step_dbm instead of input_power_dbm or servo_output_power_dbm.
+- input_power_dbm and servo_output_power_dbm should be null for P1dB tests.
+- measurement_method defaults to "POWER_SWEEP".
+- compression_threshold_db defaults to 1.0.
+- settling_time_ms defaults to 50.
+- averages defaults to 20.
+
+Optional/defaultable:
+- temperature_c defaults to [25]
+- measurement_method, compression_threshold_db, settling_time_ms, averages can use defaults
+- P1dB limit can be null if user did not provide it
+
+6. S_PARAMETER
 Required:
 - bench_type must be "S_PARAMETER_BENCH"
 - s_parameter_settings must be non-null
@@ -259,12 +283,12 @@ IMPORTANT RULES:
 DEMO DEFAULT MODE:
 - If the user says anything like "use defaults", "default values", "generate with defaults", "demo values", "make a demo test", or "use default values", then you are allowed to use default values for all missing required fields.
 - In demo default mode, status should be "ready" as long as the test_type is known from the current request or recent chat context.
-- If the test_type is not known but the user asks for defaults, ask which test type: GAIN, EVM, ACPR, or CURRENT.
+- If the test_type is not known but the user asks for defaults, ask which test type: GAIN, EVM, ACPR, CURRENT, or P1DB.
 - Always list any used defaults in default_assumptions.
 - If recent chat context indicates a test type and the latest message asks to use defaults, use the test type from recent chat context.
 - If the latest user request explicitly says "Generate a [TEST_TYPE] RF test using demo default values", immediately return status "ready" with a complete test_case for that test type.
 - Do not infer GAIN test type just because the DUT mode name contains the word "gain", such as "TX HIGH Gain".
-- If recent context says the selected test type is EVM, ACPR, GAIN, or CURRENT, keep that test type unless the latest user message explicitly asks to switch test type.
+- If recent context says the selected test type is EVM, ACPR, GAIN, CURRENT, or P1DB, keep that test type unless the latest user message explicitly asks to switch test type.
 - If the latest user asks to use defaults for remaining parameters, preserve all explicitly provided parameters from recent context and only default missing fields.
 - If the user says "for other parameters use default", treat it as demo default mode for the currently selected test type.
 - If servo_output_power_dbm is provided or defaulted, input_power_dbm must be null.
@@ -312,11 +336,24 @@ TEST-SPECIFIC DEMO DEFAULTS:
   - servo_output_power_dbm = null
   - measurement.limit = { "operator": "<=", "value": 500, "unit": "mA" }
 
+- For P1DB:
+  - pin_start_dbm = -30
+  - pin_stop_dbm = +10
+  - pin_step_dbm = 0.5
+  - input_power_dbm = null
+  - servo_output_power_dbm = null
+  - measurement_method = "POWER_SWEEP"
+  - compression_threshold_db = 1.0
+  - settling_time_ms = 50
+  - averages = 20
+  - measurement.limit = { "operator": ">=", "value": 18, "unit": "dBm" }
+
 TEST TYPE INFERENCE:
 - If the user mentions EVM, error vector magnitude, static EVM, or dynamic EVM, test_type is "EVM".
-- If the user mentions gain, small signal gain, power gain, or S21-style gain, test_type is "GAIN".
+- If the user mentions P1dB, 1 dB compression, one dB compression, P-1dB, P1 db, compression point, or OP1dB, test_type is "P1DB".
 - If the user mentions ACPR, ACLR, adjacent channel power, or adjacent channel leakage, test_type is "ACPR".
 - If the user mentions current, current consumption, supply current, ICC, IDD, or power consumption current, test_type is "CURRENT".
+- If the user mentions gain, small signal gain, power gain, or S21-style gain, test_type is "GAIN".
 - Do not infer GAIN from a DUT mode name like "TX HIGH GAIN". That is a mode name, not necessarily a gain test.
 - If the user mentions S-parameters, s-parameters, S11, S21, S12, S22, return loss, insertion loss, insertion gain, reverse isolation, output match, input match, VSWR, or VNA, test_type is "S_PARAMETER".
 
@@ -389,13 +426,15 @@ MEASUREMENT METRIC RULES:
 - For EVM, measurement.metric must be "EVM".
 - For ACPR, measurement.metric must be "ACPR".
 - For CURRENT, measurement.metric must be "CURRENT".
+- For P1DB, measurement.metric must be "P1DB".
 
 ADDITIONAL MEASUREMENT RULES:
 - measurement.metric is the primary metric of the test.
 - If the user asks to measure, capture, log, or record input power, add "PIN" to measurement.additional_metrics.
 - If the user asks to measure, capture, log, or record output power, add "POUT" to measurement.additional_metrics.
 - If the user asks to measure, capture, log, or record current, supply current, ICC, or IDD, add "CURRENT" to measurement.additional_metrics.
-- Do not add PIN, POUT, or CURRENT unless the user explicitly asks for them.
+- If the user asks to measure, capture, log, or record gain, add "GAIN" to measurement.additional_metrics.
+- Do not add PIN, POUT, CURRENT, or GAIN unless the user explicitly asks for them.
 - Do not change the main test_type because of additional metrics.
 - Example: An EVM test that also measures input and output power should still have test_type = "EVM" and measurement.metric = "EVM", with measurement.additional_metrics = ["PIN", "POUT"].
 
@@ -439,6 +478,15 @@ ACPR RULES:
 - If user asks for ACPR with default values, use one pair: -10 MHz and +10 MHz, bandwidth 1 MHz.
 - For ACPR, input_power_dbm should be null unless the user explicitly provides it.
 - ACPR is normally servoed to a target output power using servo_output_power_dbm.
+
+P1DB RULES:
+- P1dB uses power sweep via pin_start_dbm, pin_stop_dbm, pin_step_dbm.
+- For P1dB, input_power_dbm and servo_output_power_dbm should be null.
+- If user asks for P1dB with default values, use pin_start_dbm = -30, pin_stop_dbm = +10, pin_step_dbm = 0.5.
+- measurement_method defaults to "POWER_SWEEP".
+- compression_threshold_db defaults to 1.0.
+- settling_time_ms defaults to 50.
+- averages defaults to 20.
 
 MODULATION RULES:
 - For GAIN and CURRENT, modulation can be "CW" only if the user explicitly says CW or describes an unmodulated tone.
@@ -914,12 +962,16 @@ def _normalize_additional_measurement_metrics(test_case: RFTestCase, user_messag
 
     test_case.measurement.additional_metrics = existing
 
-def normalize_rf_test_case(test_case: RFTestCase, user_message: str = "",defaults_allowed: bool = False,) -> RFTestCase:
+def normalize_rf_test_case(
+    test_case: RFTestCase,
+    user_message: str = "",
+    defaults_allowed: bool = False,
+) -> RFTestCase:
     """
     Deterministic cleanup after LLM generation.
 
-    The LLM proposes JSON.
-    This function makes the output bench-consistent before validation/config generation.
+    Pydantic validation guarantees the required nested RF objects exist before
+    this function runs. This function then makes the output bench-consistent.
     """
     if test_case is None:
         return None
@@ -1124,6 +1176,40 @@ def apply_demo_defaults(test_case: RFTestCase, user_message: str = "") -> tuple[
             ]
             assumptions.append("ACPR band pair defaulted to -10/+10 MHz with 1 MHz bandwidth")
 
+    if test_case.test_type == "P1DB":
+        # P1dB uses power sweep, not input_power_dbm or servo_output_power_dbm
+        stim.input_power_dbm = None
+        stim.servo_output_power_dbm = None
+
+        # Set P1dB-specific measurement defaults
+        if getattr(test_case.measurement, "pin_start_dbm", None) is None:
+            test_case.measurement.pin_start_dbm = -30.0
+            assumptions.append("pin_start_dbm defaulted to -30 dBm")
+
+        if getattr(test_case.measurement, "pin_stop_dbm", None) is None:
+            test_case.measurement.pin_stop_dbm = 10.0
+            assumptions.append("pin_stop_dbm defaulted to +10 dBm")
+
+        if getattr(test_case.measurement, "pin_step_dbm", None) is None:
+            test_case.measurement.pin_step_dbm = 0.5
+            assumptions.append("pin_step_dbm defaulted to 0.5 dB")
+
+        if getattr(test_case.measurement, "measurement_method", None) is None:
+            test_case.measurement.measurement_method = "POWER_SWEEP"
+            assumptions.append("measurement_method defaulted to POWER_SWEEP")
+
+        if getattr(test_case.measurement, "compression_threshold_db", None) is None:
+            test_case.measurement.compression_threshold_db = 1.0
+            assumptions.append("compression_threshold_db defaulted to 1.0 dB")
+
+        if getattr(test_case.measurement, "settling_time_ms", None) is None:
+            test_case.measurement.settling_time_ms = 50.0
+            assumptions.append("settling_time_ms defaulted to 50 ms")
+
+        if getattr(test_case.measurement, "averages", None) is None:
+            test_case.measurement.averages = 20
+            assumptions.append("averages defaulted to 20")
+
     _set_default_limit(test_case)
 
     # This is where user-requested extra metrics are added.
@@ -1141,7 +1227,7 @@ def build_demo_test_case(test_type: str, test_id: str) -> RFTestCase:
 
     test_type = test_type.upper().strip()
 
-    if test_type not in {"GAIN", "EVM", "ACPR", "CURRENT", "S_PARAMETER"}:
+    if test_type not in {"GAIN", "EVM", "ACPR", "CURRENT", "S_PARAMETER", "P1DB"}:
         test_type = "GAIN"
 
     bench_type = "S_PARAMETER_BENCH" if test_type == "S_PARAMETER" else "RF_BENCH"
@@ -1156,6 +1242,10 @@ def build_demo_test_case(test_type: str, test_id: str) -> RFTestCase:
         environment=RFEnvironment(),
         measurement=RFMeasurement(metric=test_type),
     )
+
+    completed, _assumptions = apply_demo_defaults(base)
+    return completed
+
 
 def generate_rf_test_from_chat(
     user_message: str,
@@ -1199,14 +1289,16 @@ Remember:
     # If the user explicitly asks for defaults and we know the type, we can
     # always recover with a deterministic demo test even if the model fails.
     try:
+        print("Entered here\n")
         raw_json = call_llm_for_json(
             system_prompt=RF_SYSTEM_PROMPT,
             user_prompt=user_prompt,
         )
         safe_json = coerce_generation_json(raw_json, test_id)
         response = RFGenerationResponse.model_validate(safe_json)
-    except (ValueError, ValidationError):
+    except (ValueError, ValidationError, RuntimeError): 
         if requested_defaults and local_test_type:
+            print(f"\n[DEBUG generator.py] Using demo test case for type: {local_test_type}")
             test_case = build_demo_test_case(local_test_type, test_id)
             return RFGenerationResponse(
                 status="ready",

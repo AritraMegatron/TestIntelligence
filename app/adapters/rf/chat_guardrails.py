@@ -59,6 +59,8 @@ def user_requested_defaults(message: str) -> bool:
         "use default for the missing",
         "fill missing with defaults",
         "fill missing with default",
+        "fill the missing with defaults",
+        "fill the missing with default",
         "use demo default values",
         "fill missing parameters with defaults",
         "fill missing bench parameters with defaults",
@@ -81,48 +83,111 @@ def detect_test_type_from_text(text: str) -> str | None:
     """
     Detect only clear test-type intent.
     Important: do not infer GAIN from DUT mode names like TX HIGH GAIN.
+    Also prioritize explicit user intent over template instructions.
     """
     msg = (text or "").lower()
+ 
+    # First, look for explicit "selected test type is X" patterns from the app's own templates
+    # These have higher priority than general keyword searches
 
+    if re.search(r"\buser selected test type is (evm|error vector magnitude)\b", msg):
+        return "EVM"
+ 
+    if re.search(r"\buser selected test type is (acpr|aclr|adjacent channel power|adjacent channel leakage)\b", msg):
+        return "ACPR"
+ 
+    if re.search(r"\buser selected test type is (current test|current consumption|supply current|icc|idd|iddq)\b", msg):
+        return "CURRENT"
+ 
+    if re.search(r"\buser selected test type is (s-parameter|s parameter|s11|s21|s12|s22|return loss|insertion loss|insertion gain|reverse isolation|output match|input match|vswr|vna)\b", msg):
+        return "S_PARAMETER"
+ 
+    if re.search(r"\buser selected test type is (gain test|test gain|measure gain|measurement of gain|small signal gain|power gain test)\b", msg):
+        print(f"\n[DEBUG] Detected GAIN test type")
+        return "GAIN"
+
+    if re.search(r"\buser selected test type is (p1db|1db compression|one db compression|p-1db|p1 db|p1db testcase|p1db test case)\b", msg):
+        print(f"\n[DEBUG chat_guardrails.py] Detected P1DB test type from 'user selected test type is' pattern")
+        return "P1DB"
+
+    # Then look for user intent patterns in user detail sections
+    # "user detail:" indicates actual user input vs template instructions
+    user_detail_sections = re.split(r"\buser detail:\s*", msg)
+    
+    # Process each user detail section (skip the first split result if it's before any "user detail:")
+    for section in user_detail_sections[1:]:
+        # Extract just the user detail (before the next "user detail:" or end of section)
+        user_detail = section.split("\n")[0].strip()
+        
+        if re.search(r"\b(evm|error vector magnitude)\b", user_detail):
+            return "EVM"
+ 
+        if re.search(r"\b(acpr|aclr|adjacent channel power|adjacent channel leakage)\b", user_detail):
+            return "ACPR"
+ 
+        if re.search(r"\b(current test|current consumption|supply current|icc|idd|iddq)\b", user_detail):
+            return "CURRENT"
+ 
+        sparam_keywords = [
+            "s-parameter", "s parameter", "s11", "s21", "s12", "s22",
+            "return loss", "insertion loss", "insertion gain", "reverse isolation",
+            "output match", "input match", "vswr", "vna",
+        ]
+        if any(keyword in user_detail for keyword in sparam_keywords):
+            return "S_PARAMETER"
+ 
+        gain_patterns = [
+            r"\bgain test\b", r"\btest gain\b", r"\bmeasure gain\b",
+            r"\bmeasurement of gain\b", r"\bsmall signal gain\b", r"\bpower gain test\b",
+        ]
+        if any(re.search(pattern, user_detail) for pattern in gain_patterns):
+            return "GAIN"
+
+        p1db_patterns = [
+            r"\bp1db\b", r"\b1db compression\b", r"\bone db compression\b",
+            r"\bp-1db\b", r"\bp1 db\b", r"\b1-db compression\b",
+            r"\bp1db testcase\b", r"\bp1db test case\b",
+        ]
+        if any(re.search(pattern, user_detail) for pattern in p1db_patterns):
+            print(f"\n[DEBUG chat_guardrails.py] Detected P1DB test type from user detail: {user_detail}")
+            return "P1DB"
+
+    # Fallback to general message search (original behavior)
     if re.search(r"\b(evm|error vector magnitude)\b", msg):
         return "EVM"
-
+ 
     if re.search(r"\b(acpr|aclr|adjacent channel power|adjacent channel leakage)\b", msg):
         return "ACPR"
-
+ 
     if re.search(r"\b(current test|current consumption|supply current|icc|idd|iddq)\b", msg):
         return "CURRENT"
-
+ 
     sparam_keywords = [
-        "s-parameter",
-        "s parameter",
-        "s11",
-        "s21",
-        "s12",
-        "s22",
-        "return loss",
-        "insertion loss",
-        "insertion gain",
-        "reverse isolation",
-        "output match",
-        "input match",
-        "vswr",
-        "vna",
+        "s-parameter", "s parameter", "s11", "s21", "s12", "s22",
+        "return loss", "insertion loss", "insertion gain", "reverse isolation",
+        "output match", "input match", "vswr", "vna",
     ]
     if any(keyword in msg for keyword in sparam_keywords):
+        print("[DEBUG] detected test_type : S_PARAMETER (fallback)")
         return "S_PARAMETER"
-
+ 
     gain_patterns = [
-        r"\bgain test\b",
-        r"\btest gain\b",
-        r"\bmeasure gain\b",
-        r"\bmeasurement of gain\b",
-        r"\bsmall signal gain\b",
-        r"\bpower gain test\b",
+        r"\bgain test\b", r"\btest gain\b", r"\bmeasure gain\b",
+        r"\bmeasurement of gain\b", r"\bsmall signal gain\b", r"\bpower gain test\b",
     ]
     if any(re.search(pattern, msg) for pattern in gain_patterns):
         return "GAIN"
 
+    p1db_patterns = [
+        r"\bp1db\b", r"\b1db compression\b", r"\bone db compression\b",
+        r"\bp-1db\b", r"\bp1 db\b", r"\b1-db compression\b",
+        r"\bp1db testcase\b", r"\bp1db test case\b",
+    ]
+    if any(re.search(pattern, msg) for pattern in p1db_patterns):
+        print(f"\n[DEBUG chat_guardrails.py] Detected P1DB test type from fallback pattern")
+        return "P1DB"
+
+    print(f"\n[DEBUG chat_guardrails.py] No test type detected from: {msg}")
     return None
 
 
@@ -138,7 +203,7 @@ def coerce_generation_json(raw: Any, test_id: str) -> dict:
     """
     if not isinstance(raw, dict):
         return clarification_payload(
-            ["I could not read a valid RF test request from that message. Which test type do you want: GAIN, EVM, ACPR, CURRENT, or S_PARAMETER?"],
+            ["I could not read a valid RF test request from that message. Which test type do you want: GAIN, EVM, ACPR, CURRENT, P1DB, or S_PARAMETER?"],
             [DEFAULT_ASSUMPTION_TEXT],
         )
 
